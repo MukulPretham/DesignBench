@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime     @default(now())
+  submissions  Submission[]
+}
+
+model Problem {
+  id           String       @id @default(cuid())
+  slug         String       @unique
+  title        String
+  difficulty   String       @default("Medium")
+  tags         String[]     @default([])
+  statementMd  String       @db.Text
+  deliverables String       @db.Text @default("")
+  createdAt    DateTime     @default(now())
+  submissions  Submission[]
+}
+
+enum SubmissionStatus {
+  PENDING
+  DONE
+  FAILED
+}
+
+model Submission {
+  id              String           @id @default(cuid())
+  userId          String
+  problemId       String
+  version         Int
+  explanationText String           @db.Text @default("")
+  fileTreeJson    String           @db.Text @default("[]")
+  storagePath     String           @default("")
+  status          SubmissionStatus @default(PENDING)
+  feedbackMd      String?          @db.Text
+  scoresJson      String?          @db.Text
+  agentTraceJson  String?          @db.Text
+  followUpsJson   String?          @db.Text
+  createdAt       DateTime         @default(now())
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem         Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, problemId, version])
+  @@index([userId, problemId])
+}
