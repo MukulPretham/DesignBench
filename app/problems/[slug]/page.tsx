@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import Navbar from "@/components/Navbar";
@@ -20,6 +20,7 @@ export default async function SolvePage({
 
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) redirect("/login");
   const thread = userId
     ? await db.submission.findMany({
         where: { userId, problemId: problem.id },

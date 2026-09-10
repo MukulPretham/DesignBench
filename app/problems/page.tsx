@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import Navbar from "@/components/Navbar";
@@ -7,6 +8,7 @@ import DifficultyBadge from "@/components/DifficultyBadge";
 export default async function ProblemsPage() {
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) redirect("/login");
 
   const problems = await db.problem.findMany({
     orderBy: { title: "asc" },
