@@ -187,35 +187,7 @@ Email/password signup and login are handled by Auth.js v5 with a JWT session. Pa
 
 ## How it works
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant B as Browser
-    participant N as Next.js
-    participant D as Postgres
-    participant F as Upload disk
-    participant G as LangGraph
-    participant L as LLM API
-
-    U->>B: Pick problem and choose folder
-    B->>N: POST /api/submissions (multipart)
-    N->>N: Auth, validate, sanitize paths
-    N->>F: Save files
-    N->>D: Create submission (PENDING)
-    N-->>B: 201 { id, version, PENDING }
-    N->>G: after() → run evaluation
-    G->>D: Load submission + problem
-    G->>F: Read code files
-    G->>L: Pass A — approach
-    G->>L: Pass B — code audit
-    G->>L: Pass C — verdict
-    G->>D: Save feedback + scores + trace (DONE)
-    B->>N: Poll GET /api/submissions?problemId=…
-    N-->>B: vN is DONE
-    B->>U: Render review
-```
-
-The user journey in words:
+The user journey:
 
 1. **Sign up** or log in.
 2. **Pick a problem** from the library.
@@ -232,58 +204,29 @@ The user journey in words:
 
 ### System overview
 
-```mermaid
-flowchart LR
-    subgraph Client
-        B[Browser]
-    end
-
-    subgraph NextJS["Next.js App Router — Node runtime"]
-        P[Server components / pages]
-        A[Route handlers]
-        AUTH[Auth.js v5<br/>Credentials + JWT]
-        AGENT[LangGraph evaluation graph]
-    end
-
-    subgraph Data
-        DB[(Postgres<br/>Prisma 6)]
-        FS[(Local upload storage<br/>uploads/userId/submissionId)]
-    end
-
-    LLM[OpenAI-compatible LLM API]
-
-    B -->|HTTP| P
-    B -->|fetch / multipart| A
-    P --> AUTH
-    A --> AUTH
-    A --> DB
-    A --> FS
-    A -->|after| AGENT
-    AGENT --> DB
-    AGENT --> FS
-    AGENT -->|plain fetch| LLM
-```
+| Component | Responsibility |
+| --- | --- |
+| **Browser** | Renders the pages, chooses the upload folder, polls the submission thread. |
+| **Next.js pages** | Server components fetch problems and submissions directly from Prisma. |
+| **Route handlers** | Signup, upload, thread polling, follow-up questions, health check. |
+| **Auth.js v5** | Credentials login, JWT session cookie, server-side session reads. |
+| **Prisma 6 → Postgres** | Users, problems, submissions, versions, feedback, scores, traces. |
+| **Local upload storage** | Raw source files under `uploads/{userId}/{submissionId}/`. |
+| **LangGraph graph** | Assembles context, runs the three review passes, stores the result or falls back. |
+| **LLM API** | OpenAI-compatible Chat Completions endpoint called with plain `fetch`. |
 
 There is no edge middleware. Authentication is enforced server-side: pages call `auth()` and redirect, while API routes return `401`. This keeps the edge bundle small and makes every protected path explicit.
 
 ### The evaluation graph
 
-```mermaid
-flowchart LR
-    S([START]) --> ASM[assembleContext]
-    ASM --> A[approachA<br/>temp 0.5]
-    A -->|valid JSON| B[auditB<br/>temp 0.3]
-    A -->|malformed JSON, retry ≤ 3| A
-    A -->|transport error / retries exhausted| F[fallbackStore]
-    B -->|valid JSON| C[verdictC<br/>temp 0.2]
-    B -->|malformed JSON, retry ≤ 3| B
-    B -->|transport error / retries exhausted| F
-    C -->|valid JSON| ST[store]
-    C -->|malformed JSON, retry ≤ 3| C
-    C -->|transport error / retries exhausted| F
-    ST --> E([END])
-    F --> E
-```
+| Step | Node | On success | On failure |
+| --- | --- | --- | --- |
+| 1 | `assembleContext` | Load the submission, problem, code, previous verdict, and file diff | The background task logs the error |
+| 2 | `approachA` (temperature 0.5) | Valid JSON → `auditB` | Malformed JSON → retry, up to 3 attempts; transport error → `fallbackStore` |
+| 3 | `auditB` (temperature 0.3) | Valid JSON → `verdictC` | Malformed JSON → retry, up to 3 attempts; transport error → `fallbackStore` |
+| 4 | `verdictC` (temperature 0.2) | Valid JSON → `store` | Malformed JSON → retry, up to 3 attempts; transport error → `fallbackStore` |
+| 5 | `store` | Write `DONE`, feedback, scores, and trace | — |
+| 6 | `fallbackStore` | Write `DONE` with the honest fallback review and the failing pass | — |
 
 The graph uses LangGraph’s typed `Annotation.Root` state: submission id, assembled context, each pass result, attempt counters, failed pass, error, and per-pass latency. Only malformed model JSON is retried. Transport and API errors go straight to the fallback path, because retrying a bad key or a dead endpoint just wastes time.
 
@@ -327,46 +270,11 @@ The final feedback is deliberately short: a verdict plus the single highest-leve
 
 ### Data model
 
-```mermaid
-erDiagram
-    User ||--o{ Submission : owns
-    Problem ||--o{ Submission : receives
-
-    User {
-        string id PK
-        string email UK
-        string passwordHash
-        string name
-        datetime createdAt
-    }
-
-    Problem {
-        string id PK
-        string slug UK
-        string title
-        string difficulty
-        string tags
-        text statementMd
-        text deliverables
-        datetime createdAt
-    }
-
-    Submission {
-        string id PK
-        string userId FK
-        string problemId FK
-        int version
-        text explanationText
-        text fileTreeJson
-        string storagePath
-        string status
-        text feedbackMd
-        text scoresJson
-        text agentTraceJson
-        text followUpsJson
-        datetime createdAt
-    }
-```
+| Entity | Fields | Relationships |
+| --- | --- | --- |
+| **User** | `id`, `email` (unique), `passwordHash`, `name?`, `createdAt` | One user has many submissions. |
+| **Problem** | `id`, `slug` (unique), `title`, `difficulty`, `tags[]`, `statementMd`, `deliverables`, `createdAt` | One problem has many submissions. |
+| **Submission** | `id`, `userId`, `problemId`, `version`, `explanationText`, `fileTreeJson`, `storagePath`, `status`, `feedbackMd?`, `scoresJson?`, `agentTraceJson?`, `followUpsJson?`, `createdAt` | Belongs to one user and one problem. |
 
 `Submission` has a unique constraint on `(userId, problemId, version)` and an index on `(userId, problemId)`. The chat thread is derived by querying submissions ordered by version — there is no separate message table. `followUpsJson` is reserved for future persistence; follow-up answers are currently ephemeral.
 
