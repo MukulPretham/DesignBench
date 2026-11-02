@@ -1,0 +1,19 @@
+DesignBench — AI Low-Level Design Interview Practice
+
+What it is:
+DesignBench simulates a senior LLD interview. Users pick a classic design problem (Parking Lot, Splitwise, Elevator, BookMyShow, LRU Cache), upload an explanation.txt plus code, and receive structured feedback.
+
+How it works:
+- A three-pass AI panel reviews the approach, audits the code against the explanation, and produces a hiring-style verdict.
+- Feedback includes pros, severity-tagged cons with file references, improvements, top blockers, and scores for OOP, SOLID, extensibility, and clarity.
+- Every upload is versioned, so users can fix blockers, resubmit, and see whether they improved.
+
+Tech stack:
+Next.js 16, React 19, TypeScript, Prisma 6 + Postgres, Auth.js v5, Tailwind 4, LangGraph, OpenAI-compatible LLM API.
+
+Try it here:
+https://designbench-red.vercel.app/
+
+For architecture, features, setup, and the AI usage report, refer to README.md.
+
+Built by Mukul Pretham.
